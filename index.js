@@ -7,10 +7,8 @@ const { simpleParser } = require('mailparser');
 
 const app = express();
 
-// For Event Webhook (JSON body)
 app.use('/webhooks/sendgrid-events', express.json({ type: '*/*' }));
 
-// MongoDB setup
 const mongoClient = new MongoClient(process.env.MONGO_URI, { useUnifiedTopology: true });
 let db;
 async function getDb() {
@@ -22,42 +20,63 @@ async function getDb() {
   return db;
 }
 
-// --- SendGrid Event Webhook (raw JSON array of events) ---
+// ---- LOG HELPER ----
+function log(msg, ...args) {
+  console.log(`[${new Date().toISOString()}] ${msg}`, ...args);
+}
+
+// ---- EVENT WEBHOOK ----
 app.post('/webhooks/sendgrid-events', async (req, res) => {
+  log('Received SendGrid Event Webhook', req.body);
   const events = req.body;
-  if (!Array.isArray(events)) return res.status(400).send('Payload must be array');
+  if (!Array.isArray(events)) {
+    log('Event webhook: Payload not array', events);
+    return res.status(400).send('Payload must be array');
+  }
 
   try {
     const db = await getDb();
     const result = await db.collection('sendgrid_events').insertMany(events, { ordered: false });
+    log(`Inserted ${result.insertedCount} SendGrid events`);
     res.status(200).send(`Stored ${result.insertedCount} events`);
   } catch (err) {
-    console.error('[ERR] Mongo insert error:', err);
+    log('[ERR] Mongo insert error for sendgrid_events:', err);
     res.status(500).send('DB error');
   }
 });
 
-// --- SendGrid Inbound Parse Webhook (multipart MIME message) ---
+// ---- INBOUND EMAIL WEBHOOK ----
 app.post('/webhooks/inbound-email', (req, res) => {
-  const form = new formidable.IncomingForm(); // Correct usage for formidable v3+
+  log('Received inbound email webhook');
+  const form = new formidable.IncomingForm();
+
   form.parse(req, async (err, fields, files) => {
     if (err) {
-      console.error('[ERR] Formidable parse error:', err);
+      log('[ERR] Formidable parse error:', err);
       res.status(500).send('Form parse error');
       return;
     }
+    log('Parsed inbound fields:', fields);
+    log('Parsed inbound files:', files);
+
     if (!files.email) {
+      log('No email field found in files:', files);
       res.status(400).send('No email field found');
       return;
     }
+
     try {
-      // files.email can be an array or a single file object depending on the version
       const emailFile = Array.isArray(files.email) ? files.email[0] : files.email;
+      log('Processing file:', emailFile.filepath || emailFile.path);
+
       const rawEmail = fs.readFileSync(emailFile.filepath || emailFile.path);
+      log('Read raw email file, size:', rawEmail.length);
+
       const parsed = await simpleParser(rawEmail);
+      log('Parsed email subject:', parsed.subject);
 
       const db = await getDb();
-      await db.collection('inbound_emails').insertOne({
+      const result = await db.collection('inbound_emails').insertOne({
         from: parsed.from?.text,
         to: parsed.to?.text,
         subject: parsed.subject,
@@ -69,9 +88,10 @@ app.post('/webhooks/inbound-email', (req, res) => {
         raw: rawEmail.toString(),
       });
 
+      log('Inserted inbound email to MongoDB with _id:', result.insertedId);
       res.status(200).send('OK');
     } catch (err) {
-      console.error('[ERR] Mailparser error:', err);
+      log('[ERR] Mailparser or Mongo error:', err.stack || err);
       res.status(500).send('Mail parse error');
     }
   });
@@ -81,5 +101,5 @@ app.get('/health', (_, res) => res.send('OK'));
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`SendGrid Webhook server running on port ${PORT}`);
+  log(`SendGrid Webhook server running on port ${PORT}`);
 });
