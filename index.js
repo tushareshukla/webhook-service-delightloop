@@ -54,15 +54,22 @@ app.post('/webhooks/inbound-email', (req, res) => {
       return;
     }
 
-    // Try to read .eml as file (Send Raw ON)
     let rawEmail;
+    // Try files (Send Raw ON)
     if (files.email) {
       const emailFile = Array.isArray(files.email) ? files.email[0] : files.email;
       rawEmail = fs.readFileSync(emailFile.filepath || emailFile.path);
       console.log('[Inbound Email] Using files.email (Send Raw ON)');
-    } else if (fields.email) {
-      // Try to read from field (Send Raw OFF)
+    }
+    // Try fields (Send Raw OFF)
+    else if (fields.email) {
       rawEmail = fields.email;
+      // If array, get first
+      if (Array.isArray(rawEmail)) rawEmail = rawEmail[0];
+      // If string, convert to Buffer
+      if (typeof rawEmail === "string") {
+        rawEmail = Buffer.from(rawEmail, "utf8");
+      }
       console.log('[Inbound Email] Using fields.email (Send Raw OFF)');
     }
 
@@ -94,6 +101,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
     }
   });
 });
+
 
 
 app.get('/health', (_, res) => res.send('OK'));
