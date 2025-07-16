@@ -37,7 +37,6 @@ app.post('/webhooks/sendgrid-events', async (req, res) => {
   try {
     const db = await getDb();
     const result = await db.collection('sendgrid_events').insertMany(events, { ordered: false });
-    log(`Inserted ${result.insertedCount} SendGrid events`);
     res.status(200).send(`Stored ${result.insertedCount} events`);
   } catch (err) {
     log('[ERR] Mongo insert error for sendgrid_events:', err);
@@ -99,7 +98,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
 
 app.get('/health', (_, res) => res.send('OK'));
 
-const PORT = process.env.PORT || 4000;
+const PORT =  4000;
 app.listen(PORT, () => {
   log(`SendGrid Webhook server running on port ${PORT}`);
 });
