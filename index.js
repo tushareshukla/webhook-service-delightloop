@@ -30,6 +30,21 @@ app.post('/webhooks/sendgrid-events', async (req, res) => {
   }
 });
 
+app.post('/webhooks/inbound-email', async (req, res) => {
+  const { from, to, subject, text, html, headers } = req.body;
+  try {
+    const db = await getDb();
+    await db.collection('inbound_emails').insertOne({
+      from, to, subject, text, html, headers,
+      receivedAt: new Date(),
+    });
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('[ERR] Mongo insert error:', err);
+    res.status(500).send('DB error');
+  }
+});
+
 app.get('/health', (_, res) => res.send('OK'));
 
 const PORT = process.env.PORT || 4000;
