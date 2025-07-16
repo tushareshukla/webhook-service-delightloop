@@ -39,7 +39,7 @@ app.post('/webhooks/sendgrid-events', async (req, res) => {
 
 // --- SendGrid Inbound Parse Webhook (multipart MIME message) ---
 app.post('/webhooks/inbound-email', (req, res) => {
-  const form = formidable({ multiples: false });
+  const form = new formidable.IncomingForm(); // Correct usage for formidable v3+
   form.parse(req, async (err, fields, files) => {
     if (err) {
       console.error('[ERR] Formidable parse error:', err);
@@ -51,8 +51,9 @@ app.post('/webhooks/inbound-email', (req, res) => {
       return;
     }
     try {
-      // Read and parse the raw MIME email
-      const rawEmail = fs.readFileSync(files.email[0].filepath);
+      // files.email can be an array or a single file object depending on the version
+      const emailFile = Array.isArray(files.email) ? files.email[0] : files.email;
+      const rawEmail = fs.readFileSync(emailFile.filepath || emailFile.path);
       const parsed = await simpleParser(rawEmail);
 
       const db = await getDb();
@@ -62,7 +63,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
         subject: parsed.subject,
         text: parsed.text,
         html: parsed.html,
-        headers: parsed.headers,
+        headers: Object.fromEntries(parsed.headers),
         attachments: parsed.attachments,
         receivedAt: new Date(),
         raw: rawEmail.toString(),
