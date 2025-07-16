@@ -46,34 +46,34 @@ app.post('/webhooks/sendgrid-events', async (req, res) => {
 
 // ---- INBOUND EMAIL WEBHOOK ----
 app.post('/webhooks/inbound-email', (req, res) => {
-  log('Received inbound email webhook');
   const form = new formidable.IncomingForm();
-
   form.parse(req, async (err, fields, files) => {
     if (err) {
-      log('[ERR] Formidable parse error:', err);
+      console.error('[ERR] Formidable parse error:', err);
       res.status(500).send('Form parse error');
       return;
     }
-    log('Parsed inbound fields:', fields);
-    log('Parsed inbound files:', files);
 
-    if (!files.email) {
-      log('No email field found in files:', files);
-      res.status(400).send('No email field found');
+    // Try to read .eml as file (Send Raw ON)
+    let rawEmail;
+    if (files.email) {
+      const emailFile = Array.isArray(files.email) ? files.email[0] : files.email;
+      rawEmail = fs.readFileSync(emailFile.filepath || emailFile.path);
+      console.log('[Inbound Email] Using files.email (Send Raw ON)');
+    } else if (fields.email) {
+      // Try to read from field (Send Raw OFF)
+      rawEmail = fields.email;
+      console.log('[Inbound Email] Using fields.email (Send Raw OFF)');
+    }
+
+    if (!rawEmail) {
+      console.log('No email found in files or fields:', files, fields);
+      res.status(400).send('No email found');
       return;
     }
 
     try {
-      const emailFile = Array.isArray(files.email) ? files.email[0] : files.email;
-      log('Processing file:', emailFile.filepath || emailFile.path);
-
-      const rawEmail = fs.readFileSync(emailFile.filepath || emailFile.path);
-      log('Read raw email file, size:', rawEmail.length);
-
       const parsed = await simpleParser(rawEmail);
-      log('Parsed email subject:', parsed.subject);
-
       const db = await getDb();
       const result = await db.collection('inbound_emails').insertOne({
         from: parsed.from?.text,
@@ -86,15 +86,15 @@ app.post('/webhooks/inbound-email', (req, res) => {
         receivedAt: new Date(),
         raw: rawEmail.toString(),
       });
-
-      log('Inserted inbound email to MongoDB with _id:', result.insertedId);
+      console.log('Inserted inbound email to MongoDB with _id:', result.insertedId);
       res.status(200).send('OK');
     } catch (err) {
-      log('[ERR] Mailparser or Mongo error:', err.stack || err);
+      console.error('[ERR] Mailparser error:', err);
       res.status(500).send('Mail parse error');
     }
   });
 });
+
 
 app.get('/health', (_, res) => res.send('OK'));
 
