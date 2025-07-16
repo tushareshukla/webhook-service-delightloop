@@ -98,7 +98,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
 
 app.get('/health', (_, res) => res.send('OK'));
 
-const PORT =  4000;
+const PORT =  process.env.PORT || 4000;
 app.listen(PORT, () => {
   log(`SendGrid Webhook server running on port ${PORT}`);
 });
