@@ -93,7 +93,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
 
       // 2. Forward the email using SendGrid
       const toForward = {
-        to: 'tushareshukla@gmail.com',
+        to: 'harsha@delightloop.com',
         from: 'webhook@mail.delightloop.ai',
         subject: `[FWD] ${parsed.subject}`,
         text: parsed.text || '',
