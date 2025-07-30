@@ -117,6 +117,41 @@ app.post('/webhooks/inbound-email', (req, res) => {
   });
 });
 
+
+// ---- KONNECTIFY WEBHOOK ----
+app.post(
+  '/konnectify/webhook',
+  // parse any JSON body
+  express.json(),
+  async (req, res) => {
+    const payload = req.body;
+
+    if (!payload || Object.keys(payload).length === 0) {
+      return res.status(400).json({ error: 'Empty payload' });
+    }
+
+    try {
+      const db = await getDb();
+      const result = await db
+        .collection('konnectify_webhooks')
+        .insertOne({
+          payload,
+          receivedAt: new Date(),
+        });
+
+      log('Stored Konnectify webhook:', result.insertedId);
+      res.status(200).json({
+        status: 'success',
+        id: result.insertedId,
+      });
+    } catch (err) {
+      log('[ERR] Konnectify webhook DB error:', err);
+      res.status(500).json({ error: 'Database error' });
+    }
+  }
+);
+
+
 app.get('/health', (_, res) => res.send('OK'));
 
 const PORT = process.env.PORT || 4000;
