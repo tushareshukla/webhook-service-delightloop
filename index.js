@@ -126,9 +126,25 @@ app.post('/webhooks/inbound-email', (req, res) => {
             }
           );
           log("[Inbound Email] Recipient added via API");
-        } catch (apiErr) {
-          log("[ERR] API call failed:", apiErr.message);
-        }
+
+  // ✅ Send confirmation email back to sender (parsed.from)
+  const sender = parsed.from?.value?.[0]?.address;
+  if (sender) {
+    await sgMail.send({
+      to: sender,
+      from: 'hello@delightloop.ai',
+      subject: `✅ Recipient added: ${firstName} ${lastName}`,
+      text: `You successfully added the recipient ${firstName} ${lastName} <${email}> to your campaign.`,
+      html: `<p>You successfully added the recipient <strong>${firstName} ${lastName}</strong> &lt;${email}&gt; to your campaign.</p>`,
+    });
+    log(`[Confirmation Sent] Confirmation email sent to sender: ${sender}`);
+  } else {
+    log("[WARN] Could not determine sender email to send confirmation");
+  }
+} catch (apiErr) {
+  log("[ERR] API call failed:", apiErr.message);
+}
+
       }
 
       // 1. Store in MongoDB
