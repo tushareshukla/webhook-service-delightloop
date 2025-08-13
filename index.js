@@ -77,6 +77,45 @@ app.post('/webhooks/inbound-email', (req, res) => {
     try {
       const parsed = await simpleParser(rawEmail);
 
+      // ✅ New Step: Check for delightemail and delightname in email body
+      const textContent = parsed.text || "";
+      const emailMatch = textContent.match(/delightemail\s*:\s*([\w\.-]+@[\w\.-]+\.\w+)/i);
+      const nameMatch = textContent.match(/delightname\s*:\s*(.+)/i);
+
+      if (emailMatch && nameMatch) {
+        const email = emailMatch[1].trim();
+        const fullName = nameMatch[1].trim();
+        const [firstName, ...lastNameParts] = fullName.split(" ");
+        const lastName = lastNameParts.join(" ") || "";
+
+        log(`[Inbound Email] Parsed recipient: ${firstName} ${lastName} <${email}>`);
+
+        // Hit your recipients/add API
+        try {
+          await axios.post(
+            "http://localhost:5500/v1/public/organizations/67cec15e4d14cb32b6cef609/campaignsNew/689c7c7f07c5ec9c861a989e/recipients/add",
+            {
+              recipients: [
+                {
+                  firstName,
+                  lastName,
+                  mailId: email
+                }
+              ]
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "accept": "*/*"
+              }
+            }
+          );
+          log("[Inbound Email] Recipient added via API");
+        } catch (apiErr) {
+          log("[ERR] API call failed:", apiErr.message);
+        }
+      }
+
       // 1. Store in MongoDB
       const db = await getDb();
       await db.collection('inbound_emails').insertOne({
@@ -116,6 +155,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
     }
   });
 });
+
 
 
 // ---- KONNECTIFY WEBHOOK ----
