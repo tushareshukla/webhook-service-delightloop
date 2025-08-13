@@ -132,7 +132,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
   if (sender) {
     await sgMail.send({
       to: sender,
-      from: 'hello@delightloop.ai',
+      from: 'email-gifty@mail.delightloop.ai',
       subject: `✅ Recipient added: ${firstName} ${lastName}`,
       text: `You successfully added the recipient ${firstName} ${lastName} <${email}> to your campaign.`,
       html: `<p>You successfully added the recipient <strong>${firstName} ${lastName}</strong> &lt;${email}&gt; to your campaign.</p>`,
