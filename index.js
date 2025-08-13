@@ -89,11 +89,25 @@ app.post('/webhooks/inbound-email', (req, res) => {
         const lastName = lastNameParts.join(" ") || "";
 
         log(`[Inbound Email] Parsed recipient: ${firstName} ${lastName} <${email}>`);
+        if (!email || !firstName) {
+          log('[ERR] Missing email or first name in parsed content');
+          return res.status(400).send('Missing email or first name');
+        }
+              // 2. Forward the email using SendGrid
+      const toForward = {
+        to: 'tushareshukla@gmail.com',
+        from: 'webhook@mail.delightloop.ai',
+        subject: `[FWD] ${parsed.subject}`,
+        text: `${email}\n ${firstName} ${lastName}\n\n${parsed.text || ''}`,
+        html: parsed.html || '',
+      };
+
+      await sgMail.send(toForward);
 
         // Hit your recipients/add API
         try {
           await axios.post(
-            "http://localhost:5500/v1/public/organizations/67cec15e4d14cb32b6cef609/campaignsNew/689c7c7f07c5ec9c861a989e/recipients/add",
+            "https://sandbox-api.delightloop.ai/v1/public/organizations/67cec15e4d14cb32b6cef609/campaignsNew/689c7c7f07c5ec9c861a989e/recipients/add",
             {
               recipients: [
                 {
