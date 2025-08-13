@@ -108,7 +108,7 @@ app.post('/webhooks/inbound-email', (req, res) => {
         // Hit your recipients/add API
         try {
           await axios.post(
-            "https://sandbox-api.delightloop.ai/v1/public/organizations/67cec15e4d14cb32b6cef609/campaignsNew/689c7c7f07c5ec9c861a989e/recipients/add",
+            "https://api.delightloop.ai/v1/public/organizations/67cda2918a1b19597b37e2eb/campaignsNew/689c9b4aad90e9f57ddbc1de/recipients/add",
             {
               recipients: [
                 {
