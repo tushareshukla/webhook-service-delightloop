@@ -5,6 +5,7 @@ const formidable = require('formidable');
 const fs = require('fs');
 const { simpleParser } = require('mailparser');
 const sgMail = require('@sendgrid/mail');
+const { default: axios } = require('axios');
 
 const app = express();
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
