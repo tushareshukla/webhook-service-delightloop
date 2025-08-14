@@ -49,6 +49,7 @@ app.post('/webhooks/sendgrid-events', async (req, res) => {
 // ---- INBOUND EMAIL PARSE AND FORWARD ----
 app.post('/webhooks/inbound-email', (req, res) => {
   const form = new formidable.IncomingForm();
+
   form.parse(req, async (err, fields, files) => {
     if (err) {
       log('[ERR] Formidable parse error:', err);
@@ -56,98 +57,55 @@ app.post('/webhooks/inbound-email', (req, res) => {
     }
 
     let rawEmail;
-    // Send Raw ON
     if (files.email) {
       const emailFile = Array.isArray(files.email) ? files.email[0] : files.email;
       rawEmail = fs.readFileSync(emailFile.filepath || emailFile.path);
-      log('[Inbound Email] Using files.email (Send Raw ON)');
-    }
-    // Send Raw OFF
-    else if (fields.email) {
-      rawEmail = fields.email;
-      if (Array.isArray(rawEmail)) rawEmail = rawEmail[0];
+    } else if (fields.email) {
+      rawEmail = Array.isArray(fields.email) ? fields.email[0] : fields.email;
       if (typeof rawEmail === "string") rawEmail = Buffer.from(rawEmail, "utf8");
-      log('[Inbound Email] Using fields.email (Send Raw OFF)');
     }
 
     if (!rawEmail) {
-      log('No email found in files or fields:', files, fields);
+      log('[ERR] No email found');
       return res.status(400).send('No email found');
     }
 
     try {
       const parsed = await simpleParser(rawEmail);
 
-      // ✅ New Step: Check for delightemail and delightname in email body
+      // Extract custom fields from email body
       const textContent = parsed.text || "";
       const emailMatch = textContent.match(/delightemail\s*:\s*([\w\.-]+@[\w\.-]+\.\w+)/i);
       const nameMatch = textContent.match(/delightname\s*:\s*(.+)/i);
 
+      let firstName = "", lastName = "", extractedEmail = "";
+
       if (emailMatch && nameMatch) {
-        const email = emailMatch[1].trim();
+        extractedEmail = emailMatch[1].trim();
         const fullName = nameMatch[1].trim();
-        const [firstName, ...lastNameParts] = fullName.split(" ");
-        const lastName = lastNameParts.join(" ") || "";
+        [firstName, ...lastNameParts] = fullName.split(" ");
+        lastName = lastNameParts.join(" ");
 
-        log(`[Inbound Email] Parsed recipient: ${firstName} ${lastName} <${email}>`);
-        if (!email || !firstName) {
-          log('[ERR] Missing email or first name in parsed content');
-          return res.status(400).send('Missing email or first name');
+        // Add to recipients API
+        await axios.post(
+          "https://api.delightloop.ai/v1/public/organizations/67cda2918a1b19597b37e2eb/campaignsNew/689c9b4aad90e9f57ddbc1de/recipients/add",
+          { recipients: [{ firstName, lastName, mailId: extractedEmail }] }
+        );
+
+        // Send confirmation email to sender
+        const senderEmail = parsed.from?.value?.[0]?.address;
+        if (senderEmail) {
+          await sgMail.send({
+            to: senderEmail,
+            from: { email: 'email-gifty@mail.delightloop.ai', name: 'Delightloop Gifty' },
+            subject: `✅ Recipient added: ${firstName} ${lastName}`,
+            text: `You successfully added ${firstName} ${lastName} <${extractedEmail}> to your campaign.`,
+            html: `<p>You successfully added <strong>${firstName} ${lastName}</strong> &lt;${extractedEmail}&gt; to your campaign.</p>`,
+          });
         }
-              // 2. Forward the email using SendGrid
-      const toForward = {
-        to: 'tushareshukla@gmail.com',
-        from: 'webhook@mail.delightloop.ai',
-        subject: `[FWD] ${parsed.subject}`,
-        text: `${email}\n ${firstName} ${lastName}\n\n${parsed.text || ''}`,
-        html: parsed.html || '',
-      };
-
-      await sgMail.send(toForward);
-
-        // Hit your recipients/add API
-        try {
-          await axios.post(
-            "https://api.delightloop.ai/v1/public/organizations/67cda2918a1b19597b37e2eb/campaignsNew/689c9b4aad90e9f57ddbc1de/recipients/add",
-            {
-              recipients: [
-                {
-                  firstName,
-                  lastName,
-                  mailId: email
-                }
-              ]
-            },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "accept": "*/*"
-              }
-            }
-          );
-          log("[Inbound Email] Recipient added via API");
-
-  // ✅ Send confirmation email back to sender (parsed.from)
-  const sender = parsed.from?.value?.[0]?.address;
-  if (sender) {
-    await sgMail.send({
-      to: sender,
-      from: 'email-gifty@mail.delightloop.ai',
-      subject: `✅ Recipient added: ${firstName} ${lastName}`,
-      text: `You successfully added the recipient ${firstName} ${lastName} <${email}> to your campaign.`,
-      html: `<p>You successfully added the recipient <strong>${firstName} ${lastName}</strong> &lt;${email}&gt; to your campaign.</p>`,
-    });
-    log(`[Confirmation Sent] Confirmation email sent to sender: ${sender}`);
-  } else {
-    log("[WARN] Could not determine sender email to send confirmation");
-  }
-} catch (apiErr) {
-  log("[ERR] API call failed:", apiErr.message);
-}
-
       }
 
-      // 1. Store in MongoDB
+      // Store in DB
       const db = await getDb();
       await db.collection('inbound_emails').insertOne({
         from: parsed.from?.text,
@@ -161,31 +119,35 @@ app.post('/webhooks/inbound-email', (req, res) => {
         raw: rawEmail.toString(),
       });
 
-      // 2. Forward the email using SendGrid
+      // Forward email
       const toForward = {
         to: 'harsha@delightloop.com',
-        from: 'webhook@mail.delightloop.ai',
-        subject: `[FWD] ${parsed.subject}`,
+        from: { email: 'webhook@mail.delightloop.ai', name: 'Delightloop Webhook' },
+        subject: `[FWD] ${parsed.subject || ''}`,
         text: parsed.text || '',
         html: parsed.html || '',
         attachments: (parsed.attachments || []).map(att => ({
           content: att.content.toString('base64'),
-          filename: att.filename,
+          filename: att.filename || 'attachment',
           type: att.contentType,
-          disposition: att.contentDisposition,
+          disposition: att.contentDisposition || 'attachment',
         })),
       };
 
       await sgMail.send(toForward);
 
-      log('Forwarded inbound email to:', process.env.FORWARD_TO);
       res.status(200).send('OK');
     } catch (err) {
-      log('[ERR] Mailparser or forward error:', err);
+      if (err.response?.body?.errors) {
+        console.error('SendGrid API Error:', JSON.stringify(err.response.body.errors, null, 2));
+      } else {
+        console.error(err);
+      }
       res.status(500).send('Mail parse/forward error');
     }
   });
 });
+
 
 
 
