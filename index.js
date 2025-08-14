@@ -67,34 +67,54 @@ app.post('/webhooks/inbound-email', (req, res) => {
 
     if (!rawEmail) {
       log('[ERR] No email found');
-      return res.status(400).send('No email found');
+      return res.status(200).send('No email found'); // ✅ Always 200 to prevent retries
     }
 
     try {
       const parsed = await simpleParser(rawEmail);
 
-      // Extract custom fields from email body
-      const textContent = parsed.text || "";
-      const emailMatch = textContent.match(/delightemail\s*:\s*([\w\.-]+@[\w\.-]+\.\w+)/i);
+      // ======================
+      // SAFE PARSING SECTION
+      // ======================
+      const textContent = (parsed.text || "").replace(/\r/g, "");
+
+      const emailMatch = textContent.match(/delightemail\s*:\s*([^\s]+)/i);
       const nameMatch = textContent.match(/delightname\s*:\s*(.+)/i);
 
-      let firstName = "", lastName = "", extractedEmail = "";
+      let extractedEmail = emailMatch?.[1]?.trim() || "unknown@delightloop.com";
+      let fullName = nameMatch?.[1]?.trim() || "Unknown User";
 
-      if (emailMatch && nameMatch) {
-        extractedEmail = emailMatch[1].trim();
-        const fullName = nameMatch[1].trim();
-        [firstName, ...lastNameParts] = fullName.split(" ");
-        lastName = lastNameParts.join(" ");
+      // Remove trailing text after name if there are multiple lines
+      fullName = fullName.split("\n")[0].trim();
 
-        // Add to recipients API
+      const [firstName, ...lastNameParts] = fullName.split(" ");
+      const lastName = lastNameParts.join(" ") || "";
+
+      log(`[Inbound Email] Parsed recipient: ${firstName} ${lastName} <${extractedEmail}>`);
+
+      // ======================
+      // RECIPIENT API CALL
+      // ======================
+      try {
         await axios.post(
           "https://api.delightloop.ai/v1/public/organizations/67cda2918a1b19597b37e2eb/campaignsNew/689c9b4aad90e9f57ddbc1de/recipients/add",
-          { recipients: [{ firstName, lastName, mailId: extractedEmail }] }
+          {
+            recipients: [
+              { firstName, lastName, mailId: extractedEmail }
+            ]
+          }
         );
+        log("[Inbound Email] Recipient added via API");
+      } catch (apiErr) {
+        log("[ERR] API call failed:", apiErr.message);
+      }
 
-        // Send confirmation email to sender
-        const senderEmail = parsed.from?.value?.[0]?.address;
-        if (senderEmail) {
+      // ======================
+      // CONFIRMATION EMAIL
+      // ======================
+      const senderEmail = parsed.from?.value?.[0]?.address;
+      if (senderEmail) {
+        try {
           await sgMail.send({
             to: senderEmail,
             from: { email: 'email-gifty@mail.delightloop.ai', name: 'Delightloop Gifty' },
@@ -102,51 +122,66 @@ app.post('/webhooks/inbound-email', (req, res) => {
             text: `You successfully added ${firstName} ${lastName} <${extractedEmail}> to your campaign.`,
             html: `<p>You successfully added <strong>${firstName} ${lastName}</strong> &lt;${extractedEmail}&gt; to your campaign.</p>`,
           });
+          log(`[Confirmation Sent] Sent to ${senderEmail}`);
+        } catch (sendErr) {
+          log("[ERR] Confirmation email failed:", sendErr.message);
         }
       }
 
-      // Store in DB
-      const db = await getDb();
-      await db.collection('inbound_emails').insertOne({
-        from: parsed.from?.text,
-        to: parsed.to?.text,
-        subject: parsed.subject,
-        text: parsed.text,
-        html: parsed.html,
-        headers: Object.fromEntries(parsed.headers),
-        attachments: parsed.attachments,
-        receivedAt: new Date(),
-        raw: rawEmail.toString(),
-      });
-
-      // Forward email
-      const toForward = {
-        to: 'harsha@delightloop.com',
-        from: { email: 'webhook@mail.delightloop.ai', name: 'Delightloop Webhook' },
-        subject: `[FWD] ${parsed.subject || ''}`,
-        text: parsed.text || '',
-        html: parsed.html || '',
-        attachments: (parsed.attachments || []).map(att => ({
-          content: att.content.toString('base64'),
-          filename: att.filename || 'attachment',
-          type: att.contentType,
-          disposition: att.contentDisposition || 'attachment',
-        })),
-      };
-
-      await sgMail.send(toForward);
-
-      res.status(200).send('OK');
-    } catch (err) {
-      if (err.response?.body?.errors) {
-        console.error('SendGrid API Error:', JSON.stringify(err.response.body.errors, null, 2));
-      } else {
-        console.error(err);
+      // ======================
+      // FORWARD ORIGINAL EMAIL
+      // ======================
+      try {
+        await sgMail.send({
+          to: 'harsha@delightloop.com',
+          from: { email: 'webhook@mail.delightloop.ai', name: 'Delightloop Webhook' },
+          subject: `[FWD] ${parsed.subject || ''}`,
+          text: parsed.text || '',
+          html: parsed.html || '',
+          attachments: (parsed.attachments || []).map(att => ({
+            content: att.content.toString('base64'),
+            filename: att.filename || 'attachment',
+            type: att.contentType,
+            disposition: att.contentDisposition || 'attachment',
+          })),
+        });
+        log("[Forwarded] Email forwarded to harsha@delightloop.com");
+      } catch (sendErr) {
+        log("[ERR] Forward email failed:", sendErr.message);
+        if (sendErr.response?.body?.errors) {
+          log("SendGrid Error Details:", JSON.stringify(sendErr.response.body.errors, null, 2));
+        }
       }
-      res.status(500).send('Mail parse/forward error');
+
+      // ======================
+      // STORE IN DB
+      // ======================
+      try {
+        const db = await getDb();
+        await db.collection('inbound_emails').insertOne({
+          from: parsed.from?.text,
+          to: parsed.to?.text,
+          subject: parsed.subject,
+          text: parsed.text,
+          html: parsed.html,
+          headers: Object.fromEntries(parsed.headers),
+          attachments: parsed.attachments,
+          receivedAt: new Date(),
+          raw: rawEmail.toString(),
+        });
+        log("[Stored] Inbound email saved in MongoDB");
+      } catch (dbErr) {
+        log("[ERR] MongoDB store failed:", dbErr.message);
+      }
+
+      res.status(200).send('OK'); // ✅ Always 200
+    } catch (err) {
+      log('[ERR] Mailparser failed:', err.message);
+      res.status(200).send('OK'); // ✅ Always 200 to avoid SendGrid retries
     }
   });
 });
+
 
 
 
